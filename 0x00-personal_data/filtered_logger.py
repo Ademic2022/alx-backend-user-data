@@ -1,100 +1,106 @@
 #!/usr/bin/env python3
 """
-function called filter_datum
+Definition of filter_datum function that returns an obfuscated log message
 """
 from typing import List
-import logging
 import re
-from mysql.connector import connection
-from os import environ
+import logging
+import os
+import mysql.connector
 
 
-#  fields to be obfuscated
-PII_FIELDS = ("name", "email", "phone", "ssn", "password")
+PII_FIELDS = ('name', 'email', 'phone', 'ssn', 'password')
 
 
 def filter_datum(fields: List[str], redaction: str,
                  message: str, separator: str) -> str:
     """
-    The function should use a regex to replace
-    occurrences of certain field values.
-    filter_datum should be less than 5 lines long and use
+    Return an obfuscated log message
+    Args:
+        fields (list): list of strings indicating fields to obfuscate
+        redaction (str): what the field will be obfuscated to
+        message (str): the log line to obfuscate
+        separator (str): the character separating the fields
     """
-    log_line = message
     for field in fields:
-        log_line = re.sub(field + "=.*?" + separator,
-                          field + "=" + redaction + separator, log_line)
-    return log_line
+        message = re.sub(field+'=.*?'+separator,
+                         field+'='+redaction+separator, message)
+    return message
 
 
 class RedactingFormatter(logging.Formatter):
-    """ Redacting Formatter class """
+    """ Redacting Formatter class
+        """
 
     REDACTION = "***"
     FORMAT = "[HOLBERTON] %(name)s %(levelname)s %(asctime)-15s: %(message)s"
     SEPARATOR = ";"
 
     def __init__(self, fields: List[str]):
-        """ inits class instance """
         super(RedactingFormatter, self).__init__(self.FORMAT)
         self.fields = fields
 
     def format(self, record: logging.LogRecord) -> str:
-        """ filters values in incoming log records """
-        return filter_datum(
-            self.fields, self.REDACTION, super(
-                RedactingFormatter, self).format(record),
-            self.SEPARATOR)
+        """
+        redact the message of LogRecord instance
+        Args:
+        record (logging.LogRecord): LogRecord instance containing message
+        Return:
+            formatted string
+        """
+        message = super(RedactingFormatter, self).format(record)
+        redacted = filter_datum(self.fields, self.REDACTION,
+                                message, self.SEPARATOR)
+        return redacted
 
 
 def get_logger() -> logging.Logger:
-    """returns a logging.Logger object.
-            It should have a StreamHandler with
-            RedactingFormatter as formatter.
     """
-    logger = logging.getLogger(name="user_data")
+    Return a logging.Logger object
+    """
+    logger = logging.getLogger("user_data")
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    str_handler = logging.StreamHandler()
-    str_handler.setFormatter(RedactingFormatter(PII_FIELDS))
-    logger.addHandler(str_handler)
+
+    handler = logging.StreamHandler()
+
+    formatter = RedactingFormatter(PII_FIELDS)
+
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     return logger
 
 
-def get_db() -> connection.MySQLConnection:
+def get_db() -> mysql.connector.connection.MySQLConnection:
     """
-    Connect to mysql server with environmental vars
     """
-    username = environ.get("PERSONAL_DATA_DB_USERNAME", "root")
-    password = environ.get("PERSONAL_DATA_DB_PASSWORD", "")
-    db_host = environ.get("PERSONAL_DATA_DB_HOST", "localhost")
-    db_name = environ.get("PERSONAL_DATA_DB_NAME")
-    connector = connection.MySQLConnection(
-        user=username,
-        password=password,
-        host=db_host,
-        database=db_name)
-    return connector
+    user = os.getenv('PERSONAL_DATA_DB_USERNAME') or "root"
+    passwd = os.getenv('PERSONAL_DATA_DB_PASSWORD') or "root"
+    host = os.getenv('PERSONAL_DATA_DB_HOST') or "localhost"
+    db_name = os.getenv('PERSONAL_DATA_DB_NAME') or 'my_db'
+    conn = mysql.connector.connect(user=user,
+                                   password=passwd,
+                                   host=host,
+                                   database=db_name)
+    return conn
 
 
 def main():
     """
-    database connection using get_db and
-    retrieve all rows in the users"""
+    main entry point
+    """
     db = get_db()
-    cur = db.cursor()
-
-    fields = "name, email, phone, ssn, password, ip, last_login, user_agent"
     logger = get_logger()
-    query_run = "SELECT {} FROM users".format(fields)
-    cur.execute(query_run)
-    fetch_data = cur.fetchall()
-    for row in fetch_data:
-        message = "".join("{}={}; ".format(key, value) for key, value in zip(fields, row))
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM users;")
+    fields = cursor.column_names
+    for row in cursor:
+        message = "".join("{}={}; ".format(k, v) for k, v in zip(fields, row))
         logger.info(message.strip())
-    cur.close()
-    db.close
+    cursor.close()
+    db.close()
 
 
 if __name__ == "__main__":
     main()
+  
